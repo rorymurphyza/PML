@@ -1,0 +1,126 @@
+---
+title: "Predicting Movement Class"
+author: "Rory Murphy"
+date: "May 17, 2016"
+output: html_document
+---
+
+```{r load_environment, echo = FALSE, error = TRUE, warning = FALSE, message = FALSE}
+options(width = 60)
+options(scipen = 999, digits = 4)
+set.seed(172)
+```
+
+# Executive Summary
+
+Using the multitude of new activity monitoring devices has allowed for vast amounts of data related to movement to be collected. This, in turn, has allowed for detailed analysis of these movements to be performed and even goes so far as to allow for the building of prediction models. This report details the analysis and predictive model building for a data set provided by the Weight Lifting Exercise model, kindly licensed for use under the Creative Commons license.
+
+Full citation: Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+# Data Loading and Cleaning
+
+The training set consists of measurements from various accelerometers on the bodies of participants. This data needs to be loaded and cleaned if necessary.
+
+```{r load_and_clean_data, echo = TRUE, error = TRUE, warning = FALSE, message = FALSE, tidy = TRUE}
+suppressMessages(library(caret))
+fullTraining <- read.csv("pml-training.csv", na.strings = c("NA", "#DIV/0!", ""))
+indexNZV <- nearZeroVar(fullTraining)
+fullTraining <- fullTraining[, -indexNZV]
+indexNA <- sapply(fullTraining, function (x) mean(is.na(x))) > 0.95
+fullTraining <- fullTraining[, indexNA == FALSE]
+fullTraining <- fullTraining[, -c(1:5)]
+rm(indexNZV, indexNA)
+```
+
+This now gives cleaned data that has only variables that seem to have a variance with the exercise performed and do not contain any missing data.
+
+# Data Partitioning
+
+The cleaned data set can now be subset using the CARET package and the 60%/40% standard.
+
+```{r create_data_sets, echo = TRUE, error = TRUE, warning = FALSE, message = FALSE, tidy = TRUE}
+inTrain = createDataPartition(fullTraining$classe, p = 0.6, list  = FALSE)
+training = fullTraining[inTrain, ]
+testing = fullTraining[-inTrain, ]
+rm(fullTraining, inTrain)
+```
+
+This gives a training set with `r dim(training)[1]` observations of `r dim(training)[2]` variables and a testing set with `r dim(testing)[1]` observations that can be used to validate the model.
+
+# Cross-Validation
+
+It is important to ensure that the remaining variables in the data set are correlated and that they are analysed properly before the model is built.
+
+```{r cross_validation, echo = TRUE, error = TRUE, warning = FALSE, message = FALSE, tidy = TRUE, fig.align='center', fig.height = 8, fig.width = 8}
+library(corrplot)
+correlationMatrix <- cor(training[, -c(54)])
+corrplot(correlationMatrix, is.corr = TRUE, type = "upper", method = "color", tl.col = rgb(0,0,0), tl.cex = 0.5, order = "AOE")
+```
+
+```{r rm, echo = FALSE}
+rm(correlationMatrix)
+```
+As can be seen, the variable are well correlated and appear to be of the form that will ensure the model will be accurate.
+
+# Model Creation
+## Decision Tree Model
+
+The first model to be create will be the Decision Tree Model. 
+
+```{r decision_tree_model, echo = TRUE, error = TRUE, warning = FALSE, message = FALSE, tidy = TRUE, fig.align='center', fig.height = 8, fig.width = 8}
+library(rpart)
+suppressMessages(library(rattle))
+modelFitDT <- rpart(classe ~ ., data = training, method = "class")
+fancyRpartPlot(modelFitDT)
+```
+
+## Decision Tree Model Analysis
+
+Using the Decision Tree Model, it is now possible to use the test data set to check the accuracy of the model.
+
+```{r decision_tree_model_test, echo = TRUE, error = TRUE, warning = FALSE, message = FALSE, tidy = TRUE, fig.align='center', fig.height = 8, fig.width = 8}
+predictionsDT <- predict(modelFitDT, newdata = testing, type = "class")
+```
+
+Testing the accuracy of this model shows a predicted accuracy of `r confusionMatrix(predictionsDT, testing$classe)$overall['Accuracy']`, which implies a probability of 0.0388 of getting 20 out of 20 predictions correct. This is not high enough to satisfy the requirements of the model.
+
+## Random Forest Model
+
+The Random Forest Model can now be created.
+
+```{r random_forest_model, echo = TRUE, error = TRUE, warning = FALSE, message = FALSE, tidy = TRUE, fig.align='center', fig.height = 8, fig.width = 8, cache = TRUE}
+library(caret)
+library(parallel)
+suppressMessages(library(doParallel))
+cluster <- makeCluster(detectCores() - 1)
+registerDoParallel(cluster)
+suppressMessages(library(randomForest))
+controlRF <- trainControl(method = "cv", number = 3, verboseIter = FALSE)
+modelFitRF <- train(classe ~ ., data = training, method = "rf", trControl = controlRF, allowParallel = TRUE)
+```
+
+## Random Forest Model Analysis
+
+Using the Random Forest Model, it is now possible to use the test data set to check the accuracy of the model.
+
+```{r random_forest_model_test, echo = TRUE, error = TRUE, warning = FALSE, message = FALSE, tidy = TRUE, fig.align='center', fig.height = 8, fig.width = 8}
+predictionsRF <- predict(modelFitRF, newdata = testing)
+```
+
+Testing the accuracy of this model shows a predicted accuracy of `r confusionMatrix(predictionsRF, testing$classe)$overall['Accuracy']`, which implies a probability of 0.9046 of getting 20 out of 20 predictions correct. This is a very high prediction probability and will be suitable for the predictions required.
+
+## Final Model
+
+With the accuracy estimate provided by the Random Forest Model, this is determined to be the final model to be used for predicting the outcome of the test data set.
+
+# Predicting the Test Cases
+
+Part of this report is to submit the prediction results for the testing file that has been included in the assignment instructions.
+
+```{r final_test, echo = TRUE, error = TRUE, warning = FALSE, message = FALSE, tidy = TRUE, fig.align='center', fig.height = 8, fig.width = 8}
+finalTesting <- read.csv("pml-testing.csv")
+finalPrediction <- predict(modelFitRF, newdata = finalTesting)
+finalPrediction
+```
+
+These are the predicted "classe" values for the exercises described in the final testing file.
